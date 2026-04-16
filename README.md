@@ -31,7 +31,7 @@ It preserves the decoding logic (obfuscation map, AES keystore, CDEF parsing) wh
 ## **Installation**
 
 ```bash
-pip install odlparser
+pip install odlparser # not yet published to PyPI
 ```
 
 Or from source:
