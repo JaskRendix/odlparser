@@ -1,0 +1,27 @@
+[project]
+name = "odlparser"
+version = "0.1.0"
+description = "Modern, modular OneDrive ODL log parser"
+authors = [
+    { name = "Giorgio" }
+]
+requires-python = ">=3.10"
+readme = "README.md"
+
+dependencies = [
+    "construct",
+    "pycryptodome",
+]
+
+[project.scripts]
+odlparse = "odlparser.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
