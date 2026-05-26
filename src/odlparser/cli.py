@@ -195,14 +195,14 @@ def main() -> None:
         print(f"Processing {file.name}")
 
         try:
-            version, raw_data = load_odl_file(file)
+            odl_file = load_odl_file(file)
         except OdlReadError as ex:
             print(f"ERROR: {ex}")
             continue
 
         records = parse_odl(
-            version=version,
-            raw_data=raw_data,
+            version=odl_file.version,
+            raw_data=odl_file.data,
             filename=file.name,
             decryptor=decryptor,
         )

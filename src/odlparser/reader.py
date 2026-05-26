@@ -18,6 +18,7 @@ import io
 import zlib
 from pathlib import Path
 
+from .models import OdlFile
 from .structures import OdlHeader
 
 
@@ -88,17 +89,16 @@ def _maybe_decompress_gzip(f: io.BufferedReader, start_pos: int) -> io.BytesIO:
     return io.BytesIO(f.read())
 
 
-def load_odl_file(path: str | Path) -> tuple[int, bytes]:
+def load_odl_file(path: str | Path) -> OdlFile:
     """
-    Load an ODL file and return:
-        (version, full_data_bytes)
+    Load an ODL file and return an OdlFile object.
 
     Steps:
     - Read first 0x100 bytes (ODL header)
     - Parse version
     - Seek to first CDEF or gzip header
     - Decompress if needed
-    - Return clean byte buffer
+    - Return clean byte buffer + metadata
 
     Raises:
         OdlReadError for any I/O or format issue.
@@ -113,15 +113,14 @@ def load_odl_file(path: str | Path) -> tuple[int, bytes]:
 
     try:
         with path.open("rb") as f:
-            # Read ODL header (always 0x100 bytes)
             raw_header = f.read(0x100)
 
-            # Entire file is gzip-wrapped; decompress from start
+            # Entire file is gzip-wrapped
             if raw_header.startswith(b"\x1f\x8b"):
                 f.seek(0)
                 all_data = f.read()
                 try:
-                    z = zlib.decompressobj(31)  # gzip wrapper
+                    z = zlib.decompressobj(31)
                     decompressed = z.decompress(all_data)
                 except Exception as ex:
                     raise OdlReadError(f"Gzip decompression failed: {ex}") from ex
@@ -129,7 +128,6 @@ def load_odl_file(path: str | Path) -> tuple[int, bytes]:
                 if len(decompressed) < 0x100:
                     raise OdlReadError("Decompressed ODL data too short")
 
-                # Now treat decompressed bytes as a normal ODL file
                 header_bytes = decompressed[:0x100]
                 version, signature = read_odl_header(header_bytes)
 
@@ -138,24 +136,31 @@ def load_odl_file(path: str | Path) -> tuple[int, bytes]:
                 else:
                     data = decompressed[8:]
 
-                return version, data
+                return OdlFile(
+                    version=version,
+                    data=data,
+                    signature=signature,
+                    is_gzip=True,
+                )
 
+            # Normal ODL header
             version, signature = read_odl_header(raw_header)
 
-            # If signature matches, skip header
             if signature.startswith(b"EBFGONED"):
                 f.seek(0x100)
                 start_pos = 0x100
             else:
-                # Rare case: no ODL header, start at offset 8
                 f.seek(8)
                 start_pos = 8
 
-            # Detect gzip or raw CDEF
             buffer = _maybe_decompress_gzip(f, start_pos)
 
-            # Return version + full data
-            return version, buffer.read()
+            return OdlFile(
+                version=version,
+                data=buffer.read(),
+                signature=signature,
+                is_gzip=False,
+            )
 
     except Exception as ex:
         raise OdlReadError(f"Failed to load ODL file {path}: {ex}") from ex

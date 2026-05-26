@@ -33,3 +33,11 @@ class OdlRecord:
     code_file: str
     function: str
     params: str | list[str]
+
+
+@dataclass(frozen=True)
+class OdlFile:
+    version: int
+    data: bytes
+    signature: bytes
+    is_gzip: bool

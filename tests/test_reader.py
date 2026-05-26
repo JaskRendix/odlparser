@@ -11,8 +11,8 @@ def test_v2_gzip_wrapped(tmp_path, data_dir):
     with gzip.open(gz_path, "wb") as f:
         f.write(raw)
 
-    version, buffer = load_odl_file(gz_path)
-    records = parse_odl(version, buffer, gz_path.name, decryptor=None)
+    odl_file = load_odl_file(gz_path)
+    records = parse_odl(odl_file.version, odl_file.data, gz_path.name, decryptor=None)
 
     assert len(records) == 1
 
@@ -24,18 +24,18 @@ def test_v3_gzip_wrapped(tmp_path, data_dir):
     with gzip.open(gz_path, "wb") as f:
         f.write(raw)
 
-    version, buffer = load_odl_file(gz_path)
-    records = parse_odl(version, buffer, gz_path.name, decryptor=None)
+    odl_file = load_odl_file(gz_path)
+    records = parse_odl(odl_file.version, odl_file.data, gz_path.name, decryptor=None)
 
-    assert version == 3
+    assert odl_file.version == 3
     assert len(records) == 1
 
 
 def test_load_minimal_v2(data_dir):
     path = data_dir / "minimal_v2.odl"
-    version, raw = load_odl_file(path)
-    assert version == 2
-    assert isinstance(raw, bytes)
+    odl_file = load_odl_file(path)
+    assert odl_file.version == 2
+    assert isinstance(odl_file.data, bytes)
 
 
 def test_load_missing_file():

@@ -4,15 +4,15 @@ from odlparser.reader import load_odl_file
 
 def test_v2_header_parsed(data_dir):
     path = data_dir / "minimal_v2.odl"
-    version, buffer = load_odl_file(path)
-    assert version == 2
-    assert buffer[:4] == b"\xCC\xDD\xEE\xFF"  # first CDEF signature
+    odl_file = load_odl_file(path)
+    assert odl_file.version == 2
+    assert odl_file.data[:4] == b"\xCC\xDD\xEE\xFF"  # first CDEF signature
 
 
 def test_v2_single_record(data_dir):
     path = data_dir / "minimal_v2.odl"
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert len(records) == 1
     rec = records[0]
@@ -24,8 +24,8 @@ def test_v2_single_record(data_dir):
 
 def test_v2_payload_fields(data_dir):
     path = data_dir / "minimal_v2.odl"
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
     rec = records[0]
 
     # These come from the synthetic payload
@@ -38,11 +38,11 @@ def test_parse_minimal_v2(data_dir):
     path = data_dir / "minimal_v2.odl"
 
     # Step 1: load header + skip to first CDEF block
-    version, buffer = load_odl_file(path)
-    assert version == 2
+    odl_file = load_odl_file(path)
+    assert odl_file.version == 2
 
     # Step 2: parse the CDEF blocks
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
     assert isinstance(records, list)
     assert len(records) >= 1
 
@@ -78,8 +78,8 @@ def test_v2_multiple_blocks(tmp_path, data_dir):
     path = tmp_path / "multi_v2.odl"
     path.write_bytes(combined)
 
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert len(records) == 2
     assert records[0].code_file == "test"
@@ -98,8 +98,8 @@ def test_v2_bad_signature(tmp_path, data_dir):
     path = tmp_path / "bad_v2.odl"
     path.write_bytes(header + block)
 
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert records == []  # no valid blocks
 
@@ -111,7 +111,7 @@ def test_v2_truncated_header(tmp_path, data_dir):
     path = tmp_path / "trunc_v2.odl"
     path.write_bytes(truncated)
 
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert records == []

@@ -12,8 +12,8 @@ def test_mixed_v2_header_v3_block(tmp_path, data_dir):
     path = tmp_path / "mixed_v2_v3.odl"
     path.write_bytes(header_v2 + block_v3)
 
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert records == []
 
@@ -28,7 +28,7 @@ def test_mixed_v3_header_v2_block(tmp_path, data_dir):
     path = tmp_path / "mixed_v3_v2.odl"
     path.write_bytes(header_v3 + block_v2)
 
-    version, buffer = load_odl_file(path)
-    records = parse_odl(version, buffer, path.name, decryptor=None)
+    odl_file = load_odl_file(path)
+    records = parse_odl(odl_file.version, odl_file.data, path.name, decryptor=None)
 
     assert records == []

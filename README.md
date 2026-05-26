@@ -90,10 +90,10 @@ from odlparser.reader import load_odl_file
 from odlparser.parser import parse_odl
 from odlparser.decoder.unobfuscate import OdlDecryptor
 
-version, raw = load_odl_file(Path("SyncEngine-2024-01-01.1234.odlgz"))
+odl_file = load_odl_file(Path("SyncEngine-2024-01-01.1234.odlgz"))
 decryptor = OdlDecryptor(keystore=None, mapping={})
 
-records = parse_odl(version, raw, filename="log.odl", decryptor=decryptor)
+records = parse_odl(odl_file.version, odl_file.data, filename="log.odl", decryptor=decryptor)
 
 for r in records:
     print(r.timestamp, r.code_file, r.function, r.params)
