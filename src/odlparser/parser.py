@@ -1,20 +1,19 @@
 """
-High-level ODL parser.
+High-level ODL parser (refactored + test-compatible).
 
-This module:
-- Accepts raw ODL bytes from reader.load_odl_file()
-- Iterates through CDEF blocks (v2 or v3)
-- Extracts timestamp, code file, function, parameters
-- Uses OdlDecryptor + extract_strings() for unobfuscation
-- Returns a list of OdlRecord objects
-
-No filtering, no CSV, no CLI — pure parsing.
+This version:
+- Uses strategy classes (v2/v3)
+- Avoids duplication
+- Injects decoder
+- Returns int timestamps (tests expect this)
+- Silently skips invalid headers (tests expect this)
 """
 
 from __future__ import annotations
 
 import io
 import struct
+from typing import BinaryIO
 
 from .decoder.string_extract import extract_strings
 from .decoder.unobfuscate import OdlDecryptor
@@ -22,17 +21,8 @@ from .models import OdlRecord
 from .structures import CDEF_V2, CDEF_V3
 
 
-class OdlParseError(Exception):
-    """Raised when an ODL file cannot be parsed."""
-
-
 def _read_string(data: bytes, pos: int) -> tuple[int, str]:
-    """
-    Read a length-prefixed UTF-8 string from data[pos:].
-
-    Returns:
-        (bytes_consumed, decoded_string)
-    """
+    """Read a length-prefixed UTF-8 string from data[pos:]."""
     if len(data) < pos + 4:
         return 0, ""
 
@@ -53,137 +43,140 @@ def _read_string(data: bytes, pos: int) -> tuple[int, str]:
         return 4 + strlen, ""
 
 
-def _parse_v2_block(
-    buffer: io.BytesIO, decryptor: OdlDecryptor | None, filename: str, index: int
-) -> OdlRecord | None:
-    """
-    Parse a single CDEF v2 block.
-    Returns an OdlRecord or None if block is empty.
-    """
-    header_bytes = buffer.read(56)
-    if len(header_bytes) < 56:
-        return None
+class BaseCdefParser:
+    """Abstract base class for CDEF block parsers."""
 
-    try:
+    HEADER_SIZE: int = 0
+
+    def parse_header(self, header_bytes: bytes):
+        raise NotImplementedError
+
+    def compute_data_length(self, header) -> int:
+        raise NotImplementedError
+
+    def skip_context(self, buffer: BinaryIO, header) -> None:
+        """Skip context data if present (v3 only)."""
+        return
+
+    def parse_block(
+        self,
+        buffer: BinaryIO,
+        filename: str,
+        index: int,
+        decoder: OdlDecryptor | None,
+    ) -> OdlRecord | None:
+        """Unified block parsing logic."""
+        header_bytes = buffer.read(self.HEADER_SIZE)
+        if len(header_bytes) < self.HEADER_SIZE:
+            return None
+
+        # IMPORTANT: tests expect invalid headers to be silently skipped
+        try:
+            header = self.parse_header(header_bytes)
+        except Exception:
+            return None
+
+        self.skip_context(buffer, header)
+        data_len = self.compute_data_length(header)
+
+        if data_len <= 4:
+            return None
+
+        data = buffer.read(data_len)
+        if len(data) < data_len:
+            return None
+
+        pos = 0
+
+        consumed, code_file = _read_string(data, pos)
+        pos += consumed
+
+        pos += 4  # flags
+
+        consumed, function = _read_string(data, pos)
+        pos += consumed
+
+        params_raw = data[pos:] if pos < len(data) else b""
+        params = extract_strings(params_raw, decryptor=decoder, unobfuscate=True)
+
+        # IMPORTANT: tests expect raw integer timestamps, not datetime
+        return OdlRecord(
+            filename=filename,
+            index=index,
+            timestamp=header.timestamp,
+            code_file=code_file,
+            function=function,
+            params=params,
+        )
+
+
+class CdefParserV2(BaseCdefParser):
+    HEADER_SIZE = 56
+
+    def parse_header(self, header_bytes: bytes):
         header = CDEF_V2.parse(header_bytes)
-    except Exception:
-        return None
 
-    # v2: unknown_flag is always 0 or 1
-    if getattr(header, "unknown_flag", None) not in (0, 1):
-        return None
-    # v2: "one" field is always exactly 1
-    if getattr(header, "one", None) != 1:
-        return None
-    # v2: data_len is small and sane; v3 data_len is much larger
-    if header.data_len > 10_000_000:
-        return None
+        # These validations must NOT raise — tests expect silent skip
+        if header.unknown_flag not in (0, 1):
+            raise ValueError("invalid v2 unknown_flag")
 
-    if header.data_len <= 4:
-        return None
+        if header.one != 1:
+            raise ValueError("invalid v2 'one' field")
 
-    data = buffer.read(header.data_len)
-    pos = 0
+        if header.data_len > 10_000_000:
+            raise ValueError("v2 data_len too large")
 
-    consumed, code_file = _read_string(data, pos)
-    pos += consumed
+        return header
 
-    pos += 4  # flags
-
-    consumed, function = _read_string(data, pos)
-    pos += consumed
-
-    params_raw = data[pos:] if pos < len(data) else b""
-    params = extract_strings(params_raw, decryptor=decryptor, unobfuscate=True)
-
-    return OdlRecord(
-        filename=filename,
-        index=index,
-        timestamp=header.timestamp,
-        code_file=code_file,
-        function=function,
-        params=params,
-    )
+    def compute_data_length(self, header) -> int:
+        return header.data_len
 
 
-def _parse_v3_block(
-    buffer: io.BytesIO, decryptor: OdlDecryptor | None, filename: str, index: int
-) -> OdlRecord | None:
-    """
-    Parse a single CDEF v3 block.
-    Returns an OdlRecord or None if block is empty.
-    """
-    header_bytes = buffer.read(32)
-    if len(header_bytes) < 32:
-        return None
+class CdefParserV3(BaseCdefParser):
+    HEADER_SIZE = 32
 
-    try:
-        header = CDEF_V3.parse(header_bytes)
-    except Exception:
-        return None
+    def parse_header(self, header_bytes: bytes):
+        return CDEF_V3.parse(header_bytes)
 
-    if header.data_len <= 4:
-        return None
+    def skip_context(self, buffer: BinaryIO, header) -> None:
+        if header.context_data_len > 0:
+            buffer.seek(header.context_data_len, io.SEEK_CUR)
+        else:
+            buffer.seek(24, io.SEEK_CUR)
 
-    if header.context_data_len > 0:
-        buffer.seek(header.context_data_len, io.SEEK_CUR)
-        data_len = header.data_len - header.context_data_len
-    else:
-        buffer.seek(24, io.SEEK_CUR)
-        data_len = header.data_len - 24
+    def compute_data_length(self, header) -> int:
+        if header.context_data_len > 0:
+            return header.data_len - header.context_data_len
+        return header.data_len - 24
 
-    data = buffer.read(data_len)
-    pos = 0
 
-    consumed, code_file = _read_string(data, pos)
-    pos += consumed
-
-    pos += 4  # flags
-
-    consumed, function = _read_string(data, pos)
-    pos += consumed
-
-    params_raw = data[pos:] if pos < len(data) else b""
-    params = extract_strings(params_raw, decryptor=decryptor, unobfuscate=True)
-
-    return OdlRecord(
-        filename=filename,
-        index=index,
-        timestamp=header.timestamp,
-        code_file=code_file,
-        function=function,
-        params=params,
-    )
+def _get_parser(version: int) -> BaseCdefParser:
+    if version == 2:
+        return CdefParserV2()
+    elif version == 3:
+        return CdefParserV3()
+    raise ValueError(f"Unsupported ODL version: {version}")
 
 
 def parse_odl(
-    version: int, raw_data: bytes, filename: str, decryptor: OdlDecryptor | None = None
+    version: int,
+    raw_data: bytes,
+    filename: str,
+    decryptor: OdlDecryptor | None = None,
 ) -> list[OdlRecord]:
     """
     Parse an ODL file into a list of OdlRecord objects.
-
-    Args:
-        version: ODL version (2 or 3)
-        raw_data: full decompressed ODL data (after header)
-        filename: original filename (for reporting)
-        decryptor: optional OdlDecryptor for unobfuscation
-
-    Returns:
-        List[OdlRecord]
     """
+    parser = _get_parser(version)
     buffer = io.BytesIO(raw_data)
+
     records: list[OdlRecord] = []
     index = 1
 
     while True:
-        if version == 2:
-            record = _parse_v2_block(buffer, decryptor, filename, index)
-        else:
-            record = _parse_v3_block(buffer, decryptor, filename, index)
-
+        record = parser.parse_block(buffer, filename, index, decryptor)
         if record is None:
             break
-
         records.append(record)
         index += 1
 
